@@ -22,10 +22,14 @@ if test "$PHP_LUA" != "no"; then
   dnl Write more examples of tests here...
 
   dnl Remove this code block if the library does not support pkg-config.
-  PKG_CHECK_MODULES([LUA], [lua])
-  PHP_EVAL_INCLINE($LUA_CFLAGS)
-  PHP_EVAL_LIBLINE($LUA_LIBS, LUA_SHARED_LIBADD)
 
+  dnl Remove this code block if the library does not support pkg-config.
+  PKG_CHECK_MODULES([LUA], [lua])
+
+  PHP_EVAL_LIBLINE($LUA_LIBS, LUA_SHARED_LIBADD)
+  PHP_EVAL_INCLINE($LUA_CFLAGS)
+
+  PHP_SUBST(LUA_SHARED_LIBADD)
 
   dnl If you need to check for a particular library version using PKG_CHECK_MODULES,
   dnl you can use comparison operators. For example:

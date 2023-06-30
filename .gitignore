@@ -39,3 +39,6 @@ tests/**/*.sh
 tests/**/*.db
 tests/**/*.mem
 tmp-php.ini
+cmake-build-debug
+.idea
+.vscode

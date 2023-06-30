@@ -11,6 +11,7 @@
 #include "lua.h"
 #include "lualib.h"
 #include "lauxlib.h"
+#include "luaconf.h"
 
 /* For compatibility with older PHP versions */
 #ifndef ZEND_PARSE_PARAMETERS_NONE
