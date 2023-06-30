@@ -1,0 +1,7 @@
+ARG_ENABLE('lua', 'lua support', 'no');
+
+if (PHP_LUA != 'no') {
+	AC_DEFINE('HAVE_LUA', 1, 'lua support enabled');
+
+	EXTENSION('lua', 'lua.c', null, '/DZEND_ENABLE_STATIC_TSRMLS_CACHE=1');
+}
