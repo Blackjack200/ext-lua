@@ -79,7 +79,7 @@ static inline zend_string *get_debug_type(zval *arg) {
 static inline void lua_push_php_value(struct lua_State *state, zval *val) {
     zend_string *str;
     switch (Z_TYPE_P(val)) {
-        //skip IS_UNDEF
+        case IS_UNDEF:
         case IS_NULL:
             lua_pushnil(state);
             break;
@@ -99,17 +99,18 @@ static inline void lua_push_php_value(struct lua_State *state, zval *val) {
             break;
         case IS_ARRAY:
             lua_newtable(state);
-            HashTable *table = Z_ARRVAL_P(val);
-            zend_ulong index;
-            zend_string *key;
+            HashTable *ht = Z_ARRVAL_P(val);
             zval *v;
-            ZEND_HASH_FOREACH_KEY_VAL(table, index, key, v){
-                        if (key) {
-                            char *str_key = ZSTR_VAL(key);
-                        } else {
-                            //TODO
-                        }
-                    }ZEND_HASH_FOREACH_END();
+            zend_ulong longkey;
+            zend_string *key;
+            ZEND_HASH_FOREACH_KEY_VAL_IND(ht, longkey, key, v){
+                lua_push_php_value(state, v);
+                if (key) {
+                    lua_setfield(state, -2, ZSTR_VAL(key));
+                } else {
+                    lua_setfield(state, -2, ZSTR_VAL(zend_u64_to_str(longkey)));
+                }
+            }ZEND_HASH_FOREACH_END();
             break;
         case IS_OBJECT:
         case IS_RESOURCE:
