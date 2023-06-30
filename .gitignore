@@ -42,3 +42,6 @@ tmp-php.ini
 cmake-build-debug
 .idea
 .vscode
+lua.dep
+configure~
+CMakeLists.txt

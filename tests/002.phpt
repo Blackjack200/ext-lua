@@ -1,13 +1,36 @@
 --TEST--
-test1() Basic test
+lua basic test
 --EXTENSIONS--
 lua
 --FILE--
 <?php
-$ret = test1();
+$vars = [
+'a' => 1,
+'b' => true,
+'c' => 1.14514,
+'d' => "from php",
+];
+$ret = lua_open();
+foreach($vars as $name => $val){
+lua_global_put($ret,$name,$val);
+}
 
-var_dump($ret);
+lua_load_file($ret,'test.lua');
+lua_run($ret);
+
+lua_load_string($ret,"print('hello lua')");
+lua_run($ret);
+
+foreach($vars as $name => $val){
+lua_load_string($ret,"print($name)");
+lua_run($ret);
+}
+lua_close($ret);
 ?>
 --EXPECT--
-The extension lua is loaded and working!
-NULL
+Hello lua
+hello lua
+1
+true
+1.14514
+from php
