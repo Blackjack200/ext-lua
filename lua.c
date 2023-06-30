@@ -8,6 +8,9 @@
 #include "ext/standard/info.h"
 #include "php_lua.h"
 #include "lua_arginfo.h"
+#include "lua.h"
+#include "lualib.h"
+#include "lauxlib.h"
 
 /* For compatibility with older PHP versions */
 #ifndef ZEND_PARSE_PARAMETERS_NONE
@@ -53,6 +56,57 @@ PHP_RINIT_FUNCTION(lua)
 	return SUCCESS;
 }
 /* }}} */
+
+/* {{{ string lua_open( [] ) */
+PHP_FUNCTION (lua_open) {
+    ZEND_PARSE_PARAMETERS_NONE();
+    struct lua_State *state = luaL_newstate();
+    RETURN_LONG((long long) state);
+}
+/* }}} */
+
+/* {{{ string lua_load( [] ) */
+PHP_FUNCTION (lua_load) {
+    char *file;
+    size_t data_len;
+    long long statePtr;
+
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+            Z_PARAM_LONG(statePtr)
+            Z_PARAM_STRING(file, data_len)
+            //
+    ZEND_PARSE_PARAMETERS_END();
+    struct lua_State *state = (struct lua_State *) statePtr;
+    int stat = luaL_loadfile(state, file);
+    RETURN_BOOL(stat);
+}
+/* }}}*/
+
+/* {{{ string lua_load( [] ) */
+PHP_FUNCTION (lua_run) {
+    long long statePtr;
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+            Z_PARAM_LONG(statePtr)
+            //
+    ZEND_PARSE_PARAMETERS_END();
+    struct lua_State *state = (struct lua_State *) statePtr;
+    luaL_openlibs(state);
+    int stat = lua_pcall(state, 0, 0, 0);
+    RETURN_BOOL(stat);
+}
+/* }}}*/
+
+/* {{{ string lua_close( [] ) */
+PHP_FUNCTION (lua_close) {
+    long long statePtr;
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+            Z_PARAM_LONG(statePtr)
+            //
+    ZEND_PARSE_PARAMETERS_END();
+    struct lua_State *state = (struct lua_State *) statePtr;
+    lua_close(state);
+}
+/* }}}*/
 
 /* {{{ PHP_MINFO_FUNCTION */
 PHP_MINFO_FUNCTION(lua)

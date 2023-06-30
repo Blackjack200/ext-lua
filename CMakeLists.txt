@@ -18,3 +18,6 @@ include_directories(${PHP_SOURCE}/Zend)
 include_directories(${PHP_SOURCE}/sapi)
 include_directories(${PHP_SOURCE}/pear)
 include_directories(${PHP_SOURCE})
+
+find_package(Lua REQUIRED)
+include_directories(${LUA_INCLUDE_DIR})
