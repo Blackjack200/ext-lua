@@ -12,8 +12,8 @@
 #include "lualib.h"
 #include "lauxlib.h"
 #include "luaconf.h"
-#include "ext/spl/spl_exceptions.h"
-#include "zend_exceptions.h"
+
+#include "binding.c"
 
 /* For compatibility with older PHP versions */
 #ifndef ZEND_PARSE_PARAMETERS_NONE
@@ -35,127 +35,41 @@ PHP_RINIT_FUNCTION (lua) {
 /* {{{ string lua_open( [] ) */
 PHP_FUNCTION (lua_open) {
     ZEND_PARSE_PARAMETERS_NONE();
-    struct lua_State *state = luaL_newstate();
-    luaL_openlibs(state);
-    RETURN_LONG((long long) state);
-}
-
-/* }}} */
-static inline zend_string *get_debug_type(zval *arg) {
-    const char *name;
-    switch (Z_TYPE_P(arg)) {
-        case IS_NULL:
-            return (ZSTR_KNOWN(ZEND_STR_NULL_LOWERCASE));
-        case IS_FALSE:
-        case IS_TRUE:
-            return (ZSTR_KNOWN(ZEND_STR_BOOL));
-        case IS_LONG:
-            return (ZSTR_KNOWN(ZEND_STR_INT));
-        case IS_DOUBLE:
-            return (ZSTR_KNOWN(ZEND_STR_FLOAT));
-        case IS_STRING:
-            return (ZSTR_KNOWN(ZEND_STR_STRING));
-        case IS_ARRAY:
-            return (ZSTR_KNOWN(ZEND_STR_ARRAY));
-        case IS_OBJECT:
-            if (Z_OBJ_P(arg)->ce->ce_flags & ZEND_ACC_ANON_CLASS) {
-                name = ZSTR_VAL(Z_OBJ_P(arg)->ce->name);
-                return (zend_string_init(name, strlen(name), 0));
-            } else {
-                return (Z_OBJ_P(arg)->ce->name);
-            }
-        case IS_RESOURCE:
-            name = zend_rsrc_list_get_rsrc_type(Z_RES_P(arg));
-            if (name) {
-                return (zend_strpprintf(0, "resource (%s)", name));
-            } else {
-                return (ZSTR_KNOWN(ZEND_STR_CLOSED_RESOURCE));
-            }
-        default:
-            return (ZSTR_KNOWN(ZEND_STR_UNKNOWN));
-    }
-}
-
-static inline void lua_push_php_value(struct lua_State *state, zval *val) {
-    zend_string *str;
-    switch (Z_TYPE_P(val)) {
-        case IS_UNDEF:
-        case IS_NULL:
-            lua_pushnil(state);
-            break;
-        case IS_LONG:
-            lua_pushinteger(state, zval_get_long(val));
-            break;
-        case IS_TRUE:
-        case IS_FALSE:
-            lua_pushboolean(state, Z_TYPE_P(val) == IS_TRUE);
-            break;
-        case IS_DOUBLE:
-            lua_pushnumber(state, zval_get_double(val));
-            break;
-        case IS_STRING:
-            str = Z_STR_P(val);
-            lua_pushlstring(state, ZSTR_VAL(str), ZSTR_LEN(str));
-            break;
-        case IS_ARRAY:
-            lua_newtable(state);
-            HashTable *ht = Z_ARRVAL_P(val);
-            zval *v;
-            zend_ulong longkey;
-            zend_string *key;
-            ZEND_HASH_FOREACH_KEY_VAL_IND(ht, longkey, key, v){
-                lua_push_php_value(state, v);
-                if (key) {
-                    lua_setfield(state, -2, ZSTR_VAL(key));
-                } else {
-                    lua_setfield(state, -2, ZSTR_VAL(zend_u64_to_str(longkey)));
-                }
-            }ZEND_HASH_FOREACH_END();
-            break;
-        case IS_OBJECT:
-        case IS_RESOURCE:
-        default:
-            //TODO
-            zend_throw_exception_ex(
-                    spl_ce_InvalidArgumentException,
-                    0,
-                    "Unsupported value type: %s",
-                    ZSTR_VAL(get_debug_type(val))
-            );
-            return;
-    }
+    LuaRuntime *rt = lua_runtime_new();
+    luaL_openlibs(L_RT_L(rt));
+    RETURN_LONG(L_RT_ID(rt));
 }
 
 ZEND_FUNCTION(lua_global_put) {
     char *key;
     size_t key_len;
-    long long statePtr;
+    long long id;
     zval *val;
 
     ZEND_PARSE_PARAMETERS_START(3, 3)
-            Z_PARAM_LONG(statePtr)
+            Z_PARAM_LONG(id)
             Z_PARAM_STRING(key, key_len)
             Z_PARAM_ZVAL(val)
             //
     ZEND_PARSE_PARAMETERS_END();
-    struct lua_State *state = (struct lua_State *) statePtr;
-    lua_push_php_value(state, val);
-    lua_setglobal(state, key);
+    LuaRuntime *rt = L_RT(id);
+    lua_push_php_value(rt, val);
+    lua_setglobal(L_RT_L(rt), key);
 }
 
 /* {{{ string lua_load_file( [] ) */
 PHP_FUNCTION (lua_load_file) {
     char *data;
     size_t data_len;
-    long long statePtr;
+    long long id;
 
     ZEND_PARSE_PARAMETERS_START(2, 2)
-            Z_PARAM_LONG(statePtr)
+            Z_PARAM_LONG(id)
             Z_PARAM_STRING(data, data_len)
             //
     ZEND_PARSE_PARAMETERS_END();
-    struct lua_State *state = (struct lua_State *) statePtr;
-    int stat = luaL_loadfile(state, data);
+    LuaRuntime *rt = L_RT(id);
+    int stat = luaL_loadfile(L_RT_L(rt), data);
     RETURN_BOOL(stat);
 }
 /* }}}*/
@@ -164,41 +78,40 @@ PHP_FUNCTION (lua_load_file) {
 PHP_FUNCTION (lua_load_string) {
     char *data;
     size_t data_len;
-    long long statePtr;
+    long long id;
 
     ZEND_PARSE_PARAMETERS_START(2, 2)
-            Z_PARAM_LONG(statePtr)
+            Z_PARAM_LONG(id)
             Z_PARAM_STRING(data, data_len)
             //
     ZEND_PARSE_PARAMETERS_END();
-    struct lua_State *state = (struct lua_State *) statePtr;
-    int stat = luaL_loadstring(state, data);
+    LuaRuntime *rt = L_RT(id);
+    int stat = luaL_loadstring(L_RT_L(rt), data);
     RETURN_BOOL(stat);
 }
 /* }}}*/
 
 /* {{{ string lua_load( [] ) */
 PHP_FUNCTION (lua_run) {
-    long long statePtr;
+    long long id;
     ZEND_PARSE_PARAMETERS_START(1, 1)
-            Z_PARAM_LONG(statePtr)
+            Z_PARAM_LONG(id)
             //
     ZEND_PARSE_PARAMETERS_END();
-    struct lua_State *state = (struct lua_State *) statePtr;
-    int stat = lua_pcall(state, 0, 0, 0);
+    LuaRuntime *rt = L_RT(id);
+    int stat = lua_pcall(L_RT_L(rt), 0, 0, 0);
     RETURN_BOOL(stat);
 }
 /* }}}*/
 
 /* {{{ string lua_close( [] ) */
 PHP_FUNCTION (lua_close) {
-    long long statePtr;
+    long long id;
     ZEND_PARSE_PARAMETERS_START(1, 1)
-            Z_PARAM_LONG(statePtr)
+            Z_PARAM_LONG(id)
             //
     ZEND_PARSE_PARAMETERS_END();
-    struct lua_State *state = (struct lua_State *) statePtr;
-    lua_close(state);
+    lua_runtime_free(L_RT(id));
 }
 /* }}}*/
 
