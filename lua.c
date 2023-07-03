@@ -32,6 +32,17 @@ PHP_RINIT_FUNCTION (lua) {
 }
 /* }}} */
 
+#define CHECK_LUA_RET() if (stat != LUA_OK) { \
+const char *errorMsg = lua_tostring(rt->L, -1); \
+lua_pop(rt->L, 1); \
+zend_throw_exception_ex( \
+        spl_ce_RuntimeException, \
+0, \
+"%s", \
+errorMsg \
+); \
+}
+
 /* {{{ string lua_open( [] ) */
 PHP_FUNCTION (lua_open) {
     ZEND_PARSE_PARAMETERS_NONE();
@@ -70,7 +81,7 @@ PHP_FUNCTION (lua_load_file) {
     ZEND_PARSE_PARAMETERS_END();
     LuaRuntime *rt = L_RT(id);
     int stat = luaL_loadfile(L_RT_L(rt), data);
-    RETURN_BOOL(stat);
+    CHECK_LUA_RET()
 }
 /* }}}*/
 
@@ -87,7 +98,41 @@ PHP_FUNCTION (lua_load_string) {
     ZEND_PARSE_PARAMETERS_END();
     LuaRuntime *rt = L_RT(id);
     int stat = luaL_loadstring(L_RT_L(rt), data);
-    RETURN_BOOL(stat);
+    CHECK_LUA_RET()
+}
+/* }}}*/
+
+/* {{{ string lua_do_string( [] ) */
+PHP_FUNCTION (lua_do_string) {
+    char *data;
+    size_t data_len;
+    long long id;
+
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+            Z_PARAM_LONG(id)
+            Z_PARAM_STRING(data, data_len)
+            //
+    ZEND_PARSE_PARAMETERS_END();
+    LuaRuntime *rt = L_RT(id);
+    int stat = luaL_dostring(L_RT_L(rt), data);
+    CHECK_LUA_RET()
+}
+/* }}}*/
+
+/* {{{ string lua_do_file( [] ) */
+PHP_FUNCTION (lua_do_file) {
+    char *data;
+    size_t data_len;
+    long long id;
+
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+            Z_PARAM_LONG(id)
+            Z_PARAM_STRING(data, data_len)
+            //
+    ZEND_PARSE_PARAMETERS_END();
+    LuaRuntime *rt = L_RT(id);
+    int stat = luaL_dofile(L_RT_L(rt), data);
+    CHECK_LUA_RET()
 }
 /* }}}*/
 
@@ -100,7 +145,7 @@ PHP_FUNCTION (lua_run) {
     ZEND_PARSE_PARAMETERS_END();
     LuaRuntime *rt = L_RT(id);
     int stat = lua_pcall(L_RT_L(rt), 0, 0, 0);
-    RETURN_BOOL(stat);
+    CHECK_LUA_RET()
 }
 /* }}}*/
 
