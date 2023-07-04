@@ -34,5 +34,8 @@ lua_close($ret);
 --EXPECT--
 int(1)
 1
-2
-int(2)
+2.0
+float(2)
+nil
+3.0
+float(3)
