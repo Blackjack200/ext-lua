@@ -6,6 +6,7 @@
 #include "zend_API.h"
 #include "zend_exceptions.h"
 #include "ext/spl/spl_exceptions.h"
+#include "zend_interfaces.h"
 
 typedef struct {
     lua_State *L;
@@ -16,11 +17,14 @@ typedef struct {
 #define L_RT(id) ((LuaRuntime*)(id))
 #define L_RT_L(ptrOrId) ((L_RT(ptrOrId))->L)
 
+void register_builtin_lua_function(LuaRuntime *rt);
+
 LuaRuntime *lua_runtime_new() {
     LuaRuntime *a = emalloc(sizeof(LuaRuntime));
     a->L = luaL_newstate();
     a->callbacks = emalloc(sizeof(HashTable));
     zend_hash_init(a->callbacks, 32, NULL, ZVAL_PTR_DTOR, 0);
+    register_builtin_lua_function(a);
     return a;
 }
 
@@ -123,8 +127,13 @@ zval *php_lua_value(LuaRuntime *rt, int index, zval *rv) {
             }
             lua_pop(L, 1);
             break;
-        case LUA_TFUNCTION:
         case LUA_TUSERDATA:
+            if (lua_getmetatable(L, index)) {
+                lua_pop(L, 1);
+                rv = *(zval **) lua_touserdata(L, index);
+                break;
+            }
+        case LUA_TFUNCTION:
         case LUA_TTHREAD:
         case LUA_TLIGHTUSERDATA:
         default:
@@ -141,6 +150,127 @@ zval *php_lua_value(LuaRuntime *rt, int index, zval *rv) {
 }
 
 void lua_push_php_value(LuaRuntime *rt, zval *val);
+
+int luaIndexMetaMethod(lua_State *L) {
+    zend_object *phpObj = Z_OBJ_P(*(zval **) lua_touserdata(L, 1));
+    LuaRuntime *rt = L_RT((long long) lua_tonumber(L, lua_upvalueindex(1)));
+    const char *key = luaL_checkstring(L, 2);
+    zval *prop = zend_read_property(phpObj->ce, phpObj, key, strlen(key), 1, NULL);
+    lua_push_php_value(rt, prop);
+    return 1;
+}
+
+int luaNewIndexMetaMethod(lua_State *L) {
+    zend_object *phpObj = Z_OBJ_P(*(zval **) lua_touserdata(L, 1));
+    LuaRuntime *rt = L_RT((long long) lua_tonumber(L, lua_upvalueindex(1)));
+
+    const char *key = luaL_checkstring(L, 2);
+    zval value;
+    ZVAL_UNDEF(&value);
+    php_lua_value(rt, 3, &value);
+
+    zend_update_property(phpObj->ce, phpObj, key, strlen(key), &value);
+    zval_ptr_dtor(&value);
+    return 0;
+}
+
+int luaGCMetaMethod(lua_State *L) {
+    zend_object *phpObj = Z_OBJ_P(*(zval **) lua_touserdata(L, 1));
+    LuaRuntime *rt = L_RT((long long) lua_tonumber(L, lua_upvalueindex(1)));
+    GC_DELREF(phpObj);
+    return 0;
+}
+
+int luaCallMetaMethod(lua_State *L) {
+    zend_object *phpObj = Z_OBJ_P(*(zval **) lua_touserdata(L, 1));
+    LuaRuntime *rt = L_RT((long long) lua_tonumber(L, lua_upvalueindex(1)));
+    const char *methodName = luaL_checkstring(L, 2);
+
+    // 从 Lua 中获取传递给方法的参数
+    int numArgs = lua_gettop(L) - 2;
+    zval args[numArgs];
+    for (int i = 0; i < numArgs; i++) {
+        lua_pushvalue(L, i + 3);
+        php_lua_value(rt, -1, &args[i]);
+        lua_pop(L, 1);
+    }
+
+    // 调用 PHP 对象的方法
+    zval retval;
+    ZVAL_UNDEF(&retval);
+    zend_string *zstr = zend_string_init(methodName, strlen(methodName), 0);
+    zend_call_method_if_exists(phpObj, zstr, &retval, numArgs, args);
+    zend_string_release(zstr);
+
+    // 将 PHP 方法返回值压入 Lua 栈中
+    lua_push_php_value(rt, &retval);
+
+    // 释放参数和返回值的内存
+    for (int i = 0; i < numArgs; i++) {
+        zval_ptr_dtor(&args[i]);
+    }
+    zval_ptr_dtor(&retval);
+
+    return 1;
+}
+
+void createProxiedPHPObject(LuaRuntime *rt, zval *phpObj) {
+    Z_ADDREF_P(phpObj);
+    lua_State *L = L_RT_L(rt);
+    zval **ptr = (zval **) lua_newuserdata(L, sizeof(zval *));
+    *ptr = phpObj;
+    lua_newtable(L);
+
+    lua_pushnumber(L, L_RT_ID(rt));
+    lua_pushcclosure(L, luaIndexMetaMethod, 1);
+    lua_setfield(L, -2, "__index");
+
+    lua_pushnumber(L, L_RT_ID(rt));
+    lua_pushcclosure(L, luaNewIndexMetaMethod, 1);
+    lua_setfield(L, -2, "__newindex");
+
+    lua_pushnumber(L, L_RT_ID(rt));
+    lua_pushcclosure(L, luaGCMetaMethod, 1);
+    lua_setfield(L, -2, "__gc");
+
+    lua_pushnumber(L, L_RT_ID(rt));
+    lua_pushcclosure(L, luaCallMetaMethod, 1);
+    lua_setfield(L, -2, "__call");
+
+    lua_setmetatable(L, -2);
+}
+
+int luaCreateObject(lua_State *L) {
+    //TODO
+    LuaRuntime *rt = L_RT((long long) lua_tonumber(L, lua_upvalueindex(1)));
+    zend_class_entry *ce;
+
+    if (lua_isstring(L, 1)) {
+        const char *className = lua_tostring(L, 1);
+        zend_string *zstr = zend_string_init(className, strlen(className), 0);
+        ce = zend_lookup_class(zstr);
+        zend_string_release(zstr);
+        if (ce == NULL) {
+            const char *errorMsg = lua_pushfstring(L, "Class %s not found", className);
+            luaL_error(L, errorMsg);
+            return 0;
+        }
+    } else {
+        luaL_error(L, "Invalid argument: expected string");
+        return 0;
+    }
+    zval phpObj;
+    object_init_ex(&phpObj, zend_standard_class_def);
+    lua_push_php_value(rt, &phpObj);
+    zval_ptr_dtor(&phpObj);
+    return 1;
+}
+
+void register_builtin_lua_function(LuaRuntime *rt) {
+    lua_pushnumber(rt->L, L_RT_ID(rt));
+    lua_pushcclosure(rt->L, luaCreateObject, 1);
+    lua_setglobal(rt->L, "createObject");
+}
 
 int php_lua_call_callback(lua_State *L) {
     zval retval;
@@ -190,7 +320,7 @@ void lua_push_php_value(LuaRuntime *rt, zval *val) {
             break;
         case IS_STRING:
             str = Z_STR_P(val);
-            lua_pushlstring(L, ZSTR_VAL(str), ZSTR_LEN(str));
+            lua_pushstring(L, ZSTR_VAL(str));
             break;
         case IS_ARRAY:
             lua_newtable(L);
@@ -216,8 +346,10 @@ void lua_push_php_value(LuaRuntime *rt, zval *val) {
                 lua_pushcclosure(L, php_lua_call_callback, 2);
                 Z_ADDREF_P(val);
                 zend_hash_index_add(rt->callbacks, zend_hash_num_elements(rt->callbacks), val);
-                return;
+            } else {
+                createProxiedPHPObject(rt, val);
             }
+            break;
         case IS_RESOURCE:
         default:
             //TODO
@@ -230,3 +362,5 @@ void lua_push_php_value(LuaRuntime *rt, zval *val) {
             return;
     }
 }
+
+
