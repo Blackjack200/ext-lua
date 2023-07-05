@@ -8,8 +8,9 @@ class A extends stdClass {
 public function hi(){
 echo "HI\n";
 }
-public function hiStr():string{
-return "HiStr";
+public function hiStr(string $c):string{
+var_dump("from lua $c");
+return "HiStr: ".$c;
 }
 }
 $obj = new A();
@@ -26,7 +27,8 @@ var_dump($obj->a);
 
 lua_do_string($ret, 'print(obj.b)');
 lua_do_string($ret, 'obj.b=3');
-lua_do_string($ret, 'print(obj.b)');
+lua_do_string($ret, 'print(obj("hiStr","lua"))');
+lua_do_string($ret, 'print(obj.hiStr)');
 var_dump($obj->b);
 
 lua_close($ret);

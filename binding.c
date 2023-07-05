@@ -155,8 +155,14 @@ int luaIndexMetaMethod(lua_State *L) {
     zend_object *phpObj = Z_OBJ_P(*(zval **) lua_touserdata(L, 1));
     LuaRuntime *rt = L_RT((long long) lua_tonumber(L, lua_upvalueindex(1)));
     const char *key = luaL_checkstring(L, 2);
-    zval *prop = zend_read_property(phpObj->ce, phpObj, key, strlen(key), 1, NULL);
-    lua_push_php_value(rt, prop);
+    zend_string *str = zend_string_init(key, strlen(key), 0);
+    zval *prop = zend_hash_find(phpObj->handlers->get_properties(phpObj), str);
+    if (prop == NULL) {
+        lua_pushnil(rt->L);
+    } else {
+        lua_push_php_value(rt, prop);
+    }
+    zend_string_release(str);
     return 1;
 }
 
@@ -186,31 +192,25 @@ int luaCallMetaMethod(lua_State *L) {
     LuaRuntime *rt = L_RT((long long) lua_tonumber(L, lua_upvalueindex(1)));
     const char *methodName = luaL_checkstring(L, 2);
 
-    // 从 Lua 中获取传递给方法的参数
-    int numArgs = lua_gettop(L) - 2;
-    zval args[numArgs];
-    for (int i = 0; i < numArgs; i++) {
-        lua_pushvalue(L, i + 3);
-        php_lua_value(rt, -1, &args[i]);
-        lua_pop(L, 1);
+    int arg_num = lua_gettop(L) - 1;
+    zval *params = emalloc(sizeof(zval) * arg_num);
+
+    for (int i = 0; i < arg_num; i++) {
+        php_lua_value(rt, -(arg_num - i), &params[i]);
     }
 
-    // 调用 PHP 对象的方法
     zval retval;
-    ZVAL_UNDEF(&retval);
     zend_string *zstr = zend_string_init(methodName, strlen(methodName), 0);
-    zend_call_method_if_exists(phpObj, zstr, &retval, numArgs, args);
+    //TODO WTF ??
+    zend_call_method_if_exists(phpObj, zstr, &retval, arg_num, params);
     zend_string_release(zstr);
 
-    // 将 PHP 方法返回值压入 Lua 栈中
     lua_push_php_value(rt, &retval);
-
-    // 释放参数和返回值的内存
-    for (int i = 0; i < numArgs; i++) {
-        zval_ptr_dtor(&args[i]);
-    }
     zval_ptr_dtor(&retval);
-
+    for (int i = 0; i < arg_num; i++) {
+        zval_ptr_dtor(&params[i]);
+    }
+    efree(params);
     return 1;
 }
 
