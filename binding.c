@@ -92,20 +92,18 @@ zval *php_lua_value(LuaRuntime *rt, int index, zval *rv) {
             break;
         case LUA_TTABLE:
             array_init(rv);
-            lua_pushvalue(L, index);  // table
-            lua_pushnil(L);  // first key
+            lua_pushvalue(L, index);
+            lua_pushnil(L);
             while (lua_next(L, -2) != 0) {
                 zval key, val;
 
                 lua_pushvalue(L, -2);
 
-                /* uses 'key' (at index -1) and 'value' (at index -2) */
                 if (!php_lua_value(rt, -1, &key)) {
                     break;
                 }
                 if (!php_lua_value(rt, -2, &val)) {
                     zval_ptr_dtor(&key);
-                    /* there is a warning already in php_lua_value */
                     break;
                 }
 
@@ -173,8 +171,7 @@ int luaNewIndexMetaMethod(lua_State *L) {
     const char *key = luaL_checkstring(L, 2);
     zval value;
     ZVAL_UNDEF(&value);
-    php_lua_value(rt, 3, &value);
-
+    value = *php_lua_value(rt, 3, &value);
     zend_update_property(phpObj->ce, phpObj, key, strlen(key), &value);
     zval_ptr_dtor(&value);
     return 0;
@@ -183,16 +180,17 @@ int luaNewIndexMetaMethod(lua_State *L) {
 int luaGCMetaMethod(lua_State *L) {
     zend_object *phpObj = Z_OBJ_P(*(zval **) lua_touserdata(L, 1));
     LuaRuntime *rt = L_RT((long long) lua_tonumber(L, lua_upvalueindex(1)));
-    GC_DELREF(phpObj);
+    GC_TRY_DELREF(phpObj);
     return 0;
 }
 
 int luaCallMetaMethod(lua_State *L) {
-    zend_object *phpObj = Z_OBJ_P(*(zval **) lua_touserdata(L, 1));
+    zval *zp = *(zval **) lua_touserdata(L, 1);
+    zend_object *phpObj = Z_OBJ_P(zp);
     LuaRuntime *rt = L_RT((long long) lua_tonumber(L, lua_upvalueindex(1)));
     const char *methodName = luaL_checkstring(L, 2);
 
-    int arg_num = lua_gettop(L) - 1;
+    int arg_num = lua_gettop(L) - 2;
     zval *params = emalloc(sizeof(zval) * arg_num);
 
     for (int i = 0; i < arg_num; i++) {
@@ -200,9 +198,15 @@ int luaCallMetaMethod(lua_State *L) {
     }
 
     zval retval;
+
     zend_string *zstr = zend_string_init(methodName, strlen(methodName), 0);
-    //TODO WTF ??
-    zend_call_method_if_exists(phpObj, zstr, &retval, arg_num, params);
+
+    zend_result result = zend_call_method_if_exists(phpObj, zstr, &retval, arg_num, params);
+    if (result == FAILURE) {
+        const char *errorMsg = lua_pushfstring(L, "Call method failed");
+        luaL_error(L, errorMsg);
+        return 0;
+    }
     zend_string_release(zstr);
 
     lua_push_php_value(rt, &retval);
@@ -211,14 +215,15 @@ int luaCallMetaMethod(lua_State *L) {
         zval_ptr_dtor(&params[i]);
     }
     efree(params);
+    ZVAL_OBJ(zp, phpObj);
     return 1;
 }
 
 void createProxiedPHPObject(LuaRuntime *rt, zval *phpObj) {
-    Z_ADDREF_P(phpObj);
     lua_State *L = L_RT_L(rt);
     zval **ptr = (zval **) lua_newuserdata(L, sizeof(zval *));
     *ptr = phpObj;
+
     lua_newtable(L);
 
     lua_pushnumber(L, L_RT_ID(rt));
@@ -241,7 +246,6 @@ void createProxiedPHPObject(LuaRuntime *rt, zval *phpObj) {
 }
 
 int luaCreateObject(lua_State *L) {
-    //TODO
     LuaRuntime *rt = L_RT((long long) lua_tonumber(L, lua_upvalueindex(1)));
     zend_class_entry *ce;
 
@@ -260,8 +264,8 @@ int luaCreateObject(lua_State *L) {
         return 0;
     }
     zval phpObj;
-    object_init_ex(&phpObj, zend_standard_class_def);
-    lua_push_php_value(rt, &phpObj);
+    object_init_ex(&phpObj, ce);
+    createProxiedPHPObject(rt, &phpObj);
     zval_ptr_dtor(&phpObj);
     return 1;
 }
@@ -347,6 +351,7 @@ void lua_push_php_value(LuaRuntime *rt, zval *val) {
                 Z_ADDREF_P(val);
                 zend_hash_index_add(rt->callbacks, zend_hash_num_elements(rt->callbacks), val);
             } else {
+                Z_ADDREF_P(val);
                 createProxiedPHPObject(rt, val);
             }
             break;
